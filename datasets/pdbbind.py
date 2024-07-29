@@ -183,7 +183,7 @@ class PDBBind(Dataset):
         print(len(lm_embeddings_chains))
         complex_graphs, rdkit_ligands = [], []
         # with tqdm(total=len(complex_names), desc=f'loading complexes {i}') as pbar:
-        for idx in tqdm(range(len(complex_names))):
+        for idx in tqdm(range(len(complex_names)), ascii=True):
             t = self.get_complex((complex_names[idx],None,lm_embeddings_chains[idx],None,None,None))
             complex_graphs.extend(t[0])
             rdkit_ligands.extend(t[1])
@@ -256,7 +256,7 @@ class PDBBind(Dataset):
                 pickle.dump((rdkit_ligands_all), f)
         else:
             complex_graphs, rdkit_ligands = [], []
-            with tqdm(total=len(complex_names_all), desc='loading complexes') as pbar:
+            with tqdm(total=len(complex_names_all), desc='loading complexes', ascii=True) as pbar:
                 for t in map(self.get_complex, zip(complex_names_all, [None] * len(complex_names_all), lm_embeddings_chains_all, [None] * len(complex_names_all), [None] * len(complex_names_all), [None] * len(complex_names_all))):
                     complex_graphs.extend(t[0])
                     rdkit_ligands.extend(t[1])
@@ -271,7 +271,7 @@ class PDBBind(Dataset):
         receptors_list = []
         print('Reading molecules and generating local structures with RDKit')
         failed_ligand_indices = []
-        for idx, ligand_description in tqdm(enumerate(self.ligand_descriptions)):
+        for idx, ligand_description in tqdm(enumerate(self.ligand_descriptions), ascii=True):
             try:
                 mol = MolFromSmiles(ligand_description)  # check if it is a smiles or a path
                 if mol is not None:
@@ -327,7 +327,7 @@ class PDBBind(Dataset):
                 if self.num_workers > 1:
                     p = Pool(self.num_workers, maxtasksperchild=1)
                     p.__enter__()
-                with tqdm(total=len(protein_paths_chunk), desc=f'loading complexes {i}/{len(protein_paths_chunk)//self.parallel_count+1}') as pbar:
+                with tqdm(total=len(protein_paths_chunk), desc=f'loading complexes {i}/{len(protein_paths_chunk)//self.parallel_count+1}', ascii=True) as pbar:
                     map_fn = p.imap_unordered if self.num_workers > 1 else map
                     for t in map_fn(self.get_complex, zip(protein_paths_chunk, lm_embeddings_chains, ligands_chunk,ligand_description_chunk)):
                         complex_graphs.extend(t[0])
@@ -357,7 +357,7 @@ class PDBBind(Dataset):
                 pickle.dump((rdkit_ligands_all), f)
         else:
             complex_graphs, rdkit_ligands, receptor_pdbs = [], [], []
-            with tqdm(total=len(self.protein_path_list), desc='loading complexes') as pbar:
+            with tqdm(total=len(self.protein_path_list), desc='loading complexes', ascii=True) as pbar:
                 for t in map(self.get_complex, zip(self.name_list, self.protein_path_list, lm_embeddings_chains_all, ligands_list, receptors_list, self.ligand_descriptions)):
                     complex_graphs.extend(t[0])
                     rdkit_ligands.extend(t[1])
@@ -578,7 +578,7 @@ class PDBBindScoring(Dataset):
                 if self.num_workers > 1:
                     p = Pool(self.num_workers, maxtasksperchild=1)
                     p.__enter__()
-                with tqdm(total=len(complex_names), desc=f'loading complexes {i}/{len(complex_names_all)//1000+1}') as pbar:
+                with tqdm(total=len(complex_names), desc=f'loading complexes {i}/{len(complex_names_all)//1000+1}', ascii=True) as pbar:
                     map_fn = p.imap_unordered if self.num_workers > 1 else map
                     for t in map_fn(self.get_complex, zip(complex_names, lm_embeddings_chains, [None] * len(complex_names), [None] * len(complex_names))):
                         complex_graphs.extend(t[0])
@@ -608,7 +608,7 @@ class PDBBindScoring(Dataset):
                 pickle.dump((rdkit_ligands_all), f)
         else:
             complex_graphs, rdkit_ligands = [], []
-            with tqdm(total=len(complex_names_all), desc='loading complexes') as pbar:
+            with tqdm(total=len(complex_names_all), desc='loading complexes', ascii=True) as pbar:
                 for t in map(self.get_complex, zip(complex_names_all, [None] * len(complex_names_all), lm_embeddings_chains_all, [None] * len(complex_names_all), [None] * len(complex_names_all), [None] * len(complex_names_all))):
                     complex_graphs.extend(t[0])
                     rdkit_ligands.extend(t[1])
@@ -637,7 +637,7 @@ class PDBBindScoring(Dataset):
         print('Generating graphs for ligands and proteins')
         receptor_graphs = {}
 
-        for i,protein_path in tqdm(enumerate(unique_protein_path_list), desc='parse receptor', total=len(unique_protein_path_list)):
+        for i,protein_path in tqdm(enumerate(unique_protein_path_list), desc='parse receptor', total=len(unique_protein_path_list), ascii=True):
             receptor_graph = HeteroData()
 
             rec_model = parse_pdb_from_path(protein_path)
@@ -681,7 +681,7 @@ class PDBBindScoring(Dataset):
                 if self.num_workers > 1:
                     p = Pool(self.num_workers, maxtasksperchild=1)
                     p.__enter__()
-                with tqdm(total=len(protein_paths_chunk), desc=f'loading complexes {i}/{len(protein_paths_chunk)//1000+1}') as pbar:
+                with tqdm(total=len(protein_paths_chunk), desc=f'loading complexes {i}/{len(protein_paths_chunk)//1000+1}', ascii=True) as pbar:
                     map_fn = p.imap_unordered if self.num_workers > 1 else map
                     for t in map_fn(self.get_complex, zip(protein_paths_chunk, lm_embeddings_chains, ligands_chunk,ligand_description_chunk)):
                         complex_graphs.extend(t[0])
@@ -712,7 +712,7 @@ class PDBBindScoring(Dataset):
         else:
 
             ligand_graphs, rdkit_ligands = [], []
-            with tqdm(total=len(self.protein_path_list), desc='loading complexes') as pbar:
+            with tqdm(total=len(self.protein_path_list), desc='loading complexes', ascii=True) as pbar:
                 for t in map(self.get_complex, zip(self.name_list, self.protein_path_list, self.ligand_descriptions)):
                     if t[0] is None:continue
                     ligand_graphs.append(t[0])

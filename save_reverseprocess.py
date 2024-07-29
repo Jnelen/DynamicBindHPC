@@ -3,6 +3,10 @@ import os
 import torch
 import shutil
 
+import warnings
+warnings.filterwarnings("ignore", message="An issue occurred while importing 'torch-sparse'")
+warnings.filterwarnings("ignore", message="An issue occurred while importing 'pyg-lib'")
+
 import time
 from argparse import ArgumentParser, Namespace, FileType
 from rdkit.Chem import RemoveHs
@@ -28,6 +32,7 @@ import random
 import pickle
 
 
+
 @contextmanager
 def Timer(title):
     'timing function'
@@ -43,6 +48,7 @@ parser.add_argument('--results_path', type=str, default='results/user_inference'
 parser.add_argument('--num_workers', type=int, default=1, help='Number of workers for creating the dataset')
 parser.add_argument('--samples_per_complex', type=int, default=1, help='Number of samples to generate')
 parser.add_argument('--pklFile', type=str, default="", help='specify the pkl files.')
+parser.add_argument('--remove_hs', action='store_true', default=False, help='Remove the hydrogens in the final output structures')
 
 def single_sample_save(pklFile):
     write_dir = os.path.dirname(pklFile)
@@ -55,7 +61,7 @@ def single_sample_save(pklFile):
     for idx, data in enumerate(data_step[1:]):
         mol_pred = copy.deepcopy(lig)
         ligandFile = os.path.join(write_dir, f'{rank}_ligand_step{idx+1}.sdf')
-        write_mol_with_coords(mol_pred, (data['ligand'].pos + data.original_center).numpy(), ligandFile)
+        write_mol_with_coords(mol_pred, (data['ligand'].pos + data.original_center).numpy(), ligandFile, args.remove_hs)
         new_receptor_pdb = copy.deepcopy(receptor_pdb)
         modify_pdb(new_receptor_pdb,data)
         pdbFile = os.path.join(write_dir, f'{rank}_receptor_step{idx+1}.{pdb_or_cif}')

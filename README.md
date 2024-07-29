@@ -1,119 +1,110 @@
-# DynamicBind
-Source code for the *Nature Communications* paper [DynamicBind: predicting ligand-specific protein-ligand complex structure with a deep equivariant generative model](https://www.nature.com/articles/s41467-024-45461-2).
+# DynamicBindHPC
+DynamicBindHPC is a fork of [DynamicBind](https://github.com/luwei0917/DynamicBind), which adds enables you to run DynamicBind on HPC systems using Singularity and Slurm.    
+For more details about DynamicBind itself, we refer to the [DynamicBind Github](https://github.com/luwei0917/DynamicBind) and the original [publication](https://www.nature.com/articles/s41467-024-45461-2).
 
-DynamicBind recovers ligand-specific conformations from unbound protein structures (e.g. AF2-predicted structures), promoting efficient transitions between different equilibrium states.
+### Requirements:
+* Singularity 
+* Slurm (There is a --no_slurm mode, but using Slurm is highly recommended)
 
-![](dynbind.gif)
+### Installation instructions:
+1. Clone the repository and navigate to it
+    ```
+    git clone https://github.com/Jnelen/DynamicBindHPC
+    ```
+   ```
+   cd DynamicBindHPC
+   ```
+   
+2. Run a test example to be prompted to automatically download the Singularity image (~5 GB) and again to download and install the model weights (~450 MB). Additionally, required cache look-up tables for SO(2) and SO(3) distributions will have to be generated. (This only needs to happen once and usually takes around 15 minutes).  
+   The `--no_slurm` flag is optional here, but makes it easier to track the progress.   
+   ```
+   python inferenceVS.py -p data/origin-1qg8.pdb -l data/ -out TEST -j 1 --no_slurm
+   ```  
+   Or if you have access to a GPU, you can also add the -gpu tag like this:  
+   ```
+   python inferenceVS.py -p data/origin-1qg8.pdb -l data/ -out TEST -j 1 -gpu --no_slurm
+   ```  
+You can also download the Singularity image manually:
+   ```
+   wget --no-check-certificate -r "https://drive.usercontent.google.com/download?id=1QFfsqvEdDJVLUvh0kVhksG8sIsrGenWO&confirm=t" -O singularity/DynamicBindHPC.sif
+   ```
+   
+   alternatively, you can build the singularity image yourself using:
+   ```
+   singularity build singularity/DynamicBindHPC.sif singularity/DynamicBindHPC.def
+   ```
+### Options
 
-# Setup Environment
+The main file to use is `inferenceVS.py`. It has the following options/flags:  
 
-Create a new environment for inference. While in the project directory run 
+- `-p`, `-r`, `--protein_path`: 
+  Path to the protein/receptor `.pdb` file.
 
-    conda env create -f environment.yml
+- `-l`, `--ligand`: 
+  The path to the directory of (separate) `mol2`/`sdf` ligand files.
 
-Or you setup step by step:
+- `-o`, `--out`, `--out_dir`: 
+  Directory where the output structures will be saved to.
 
-    conda create -n dynamicbind python=3.10
+- `-j`, `--jobs`: 
+  Number of jobs to use.
 
-Activate the environment
+- `-qu`, `--queue`: 
+  On which node to launch the slurm jobs. The default value is the default queue for the user. Might need to be specified if there is no default queue configured.
 
-    conda activate dynamicbind
+- `-m`, `--mem`: 
+  How much memory to use for each job. The default value is `4GB`.
 
-Install
+- `-gpu`, `--gpu`: 
+  Use GPU resources. This will accelerate docking calculations if a compatible GPU is available.
+
+- `-c`, `--cores`: 
+  How many cores to use for each job. The default value is `1` when used with the GPU option enabled, otherwise it defaults to `4` cores.
+
+- `-n`, `--num_outputs`, `--samples_per_complex`: 
+  How many structures to output per compound. The default value is `1`.
+  
+- `--model`: 
+  DynamicBind supports two models: `ema_inference_epoch314_model.pt` and `pro_ema_inference_epoch138_model.pt`.  The default model is the same as the one used in the paper (`ema_inference_epoch314_model.pt`)
+  
+- `--remove_hs`: 
+  Remove the hydrogens in the final output structures.
+  
+- `--no_slurm`: 
+  Don't use slurm to handle the resources. This will run all samples in interactive mode. The `--gpu` and `-c` options will still work to use a gpu and set the number of CPU cores. However, other Slurm arguments such as the amount memory, time limit, ... will be ignored.
+  
+- `--no_clean`: 
+  Don't clean the input protein structure. Not recommended unless you properly prepared the input protein structure (removed ligands, waters, ...)
+  
+- `--save_visualisation`: 
+  Save the output ligand and protein files. These files can be used to generate an animation with the `movie_generation.py` script.
+  
+- `-h`, `--help`: 
+  Show the help message and exit.
+
+### Example
+To run a DynamicBindHPC calculation
+```
+python inferenceVS.py -p data/origin-1qg8.pdb -l data/ -out TEST -j 1 -gpu --no_slurm --save_visualisation
+```
+
+And to generate the different steps from the diffusion process you can do:
+
+```
+python movie_generation.py VS_DB_TEST_.../complexes/1opj_STI_A/
+```
+
+It is also possible to run this with a gpu, which speeds up the calculations significantly. You can specify a device as well (which sets the `CUDA_VISIBLE_DEVICES` to your input):  
     
-    conda install pytorch torchvision torchaudio pytorch-cuda=11.7 -c pytorch -c nvidia
-    conda install -c conda-forge rdkit
-    conda install pyg  pyyaml  biopython -c pyg
-    pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.0.0+cu117.html
-    pip install e3nn  fair-esm spyrmsd
-
-Create a new environment for structural Relaxation.
-
-    conda create --name relax python=3.8
-
-Activate the environment
-
-    conda activate relax
-
-Install
-
-    conda install -c conda-forge openmm pdbfixer libstdcxx-ng openmmforcefields openff-toolkit ambertools=22 compilers biopython
-
-# Checkpoints Download
-Download and unzip the workdir.zip containing the model checkpoint form https://zenodo.org/records/10137507, v2 is contained here https://zenodo.org/records/10183369.
-# Inference
-
-## Dynamic Docking
-By default: 40 poses will be predicted, poses will be ranked (rank1 is the best-scoring pose, rank40 the lowest), relax processes are included.
-
-#### Inputs:
-1. **Protein (PDB File):** `protein.pdb` 
-   - Automatically cleaned to remove non-standard amino acids, water molecules, or small molecules.
-2. **Ligand (CSV File):** `ligand.csv` 
-   - Must contain a column named 'ligand' listing smiles.
-3. **Number of Animations:** 
-   - outputs intermediate pkl data, not the final animation PDB. (After `--savings_per_complex`, default is 40)
-4. **Frames in Animation/inference_steps:** 
-   - default is 20.
-
-#### Additional Options:
-- `--header`: Name of the result folder.
-- `--device`: GPU device ID.
-- `--python`: Python environment for inference.
-- `--relax_python`: Python environment for relaxation.
-- `--num_workers`: Number of processes for final output relaxation.
-
-#### Example Command:
-```bash
-python run_single_protein_inference.py protein.pdb ligand.csv --savings_per_complex 40 --inference_steps 20 --header test --device $1 --python /gxr/luwei/anaconda3/envs/dynamicbind/bin/python --relax_python /gxr/luwei/anaconda3/envs/relax/bin/python
+```
+python movie_generation.py outputDir/complexes/complex_of_interest/ --device 1 --gpu  
 ```
 
+A `rank1_receptor_reverseprocess_relaxed.pdb` and `rank1_ligand_reverseprocess_relaxed.sdf` will be output in the same directory as the original input. These contain the states of the different diffusion steps.  
 
-### Docking Outputs
-The results of the docking step, typically found in the `results/test` folder, include:
+Note: I found that often in the first steps of the animation, the poses can clash with the protein backbone. However, I run into the exact same problems when running native DynamicBind with the same inputs. 
+I raised an issue about this on their GitHub, and if a fix is made, I will also try to update DynamicBindHPC accordingly.
 
-1. **Affinity Score for Each Complex**: `affinity_prediction.csv`
-2. **Pose Score and Conformation of Each Animation**: Example files like `rank1_ligand_lddt0.63_affinity5.67_relaxed.sdf` (where 0.63 is the pose score) and corresponding protein `.pdb` files.
-3. **Data for Animation Generation**: Such as `rank1_reverseprocess_data_list.pkl` and `rank2_reverseprocess_data_list.pkl`.
-
-## Movie Generation
-Inputs:
-1. **Data from Docking Output**: Indicated by paths like `results/test/index0_idx_0/`. The notation "1+2" implies that movies for rank1 and rank2 poses are needed.
-2. **Number of Animations**: Specified by the user (default is "1").
-
-#### Example command for generating movies:
-```bash
-python movie_generation.py results/test/index0_idx_0/ 1+2 --device $1 --python /path/to/dynamicbind/python --relax_python /path/to/relax/python
-```
-
-Outputs:
-- **Final Animation PDB Files**: Located in `results/test_1qg8/index0_idx_0/`, with files like `rank1_receptor_reverseprocess_relaxed.pdb` and `rank1_ligand_reverseprocess_relaxed.pdb`.
-
-## High-Throughput Screening (HTS)
-Example command for HTS:
-```bash
-python run_single_protein_inference.py protein.pdb ligand.csv --hts --savings_per_complex 3 --inference_steps 20 --header test --device $1 --python /path/to/dynamicbind/python --relax_python /path/to/relax/python
-```
-
-HTS Output files:
-- `complete_affinity_prediction.csv`
-- `affinity_prediction.csv`
-
-# Training and testing Dataset
- https://zenodo.org/records/10429051
-
-# Reference
-```bibtex
-@article{lu2024dynamicbind,
-  title={DynamicBind: predicting ligand-specific protein-ligand complex structure with a deep equivariant generative model},
-  author={Lu, Wei and Zhang, Jixian and Huang, Weifeng and Zhang, Ziqiao and Jia, Xiangyu and Wang, Zhenyu and Shi, Leilei and Li, Chengtao and Wolynes, Peter G and Zheng, Shuangjia},
-  journal={Nature Communications},
-  volume={15},
-  number={1},
-  pages={1071},
-  year={2024},
-  publisher={Nature Publishing Group UK London}
-}
-```
-
+## License
+MIT
 

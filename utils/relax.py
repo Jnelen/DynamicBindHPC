@@ -128,6 +128,7 @@ def openmm_relax(x):
     m_order = list(
         rdkitmolh.GetPropsAsDict(includePrivate=True, includeComputed=True)["_smilesAtomOutputOrder"]
     )
+
     rdkitmolh = Chem.RenumberAtoms(rdkitmolh, m_order)
     # print(smiles)
     molecule = Molecule.from_smiles(smiles, allow_undefined_stereo=True)
@@ -240,6 +241,7 @@ def openmm_relax(x):
         new_mol = new_molecule.to_rdkit()
         new_mol = remove_hydrogen_reorder(new_mol)
         w = Chem.SDWriter(relaxed_ligandFile)
+        new_mol = Chem.AddHs(new_mol, addCoords=True)
         w.write(new_mol)
         w.close()
     return ret
@@ -355,7 +357,7 @@ def openmm_relax_protein_only(x):
 #             ret = openmm_relax_protein_only(args.relax_param)
 #             print(ret['einit'],ret['efinal'])
 #             retry = 0
-#             # ret['einit']>0 如果ret['efinal'] / ret['einit'] < 0.01其实就可以？
+#             # ret['einit']>0 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ret['efinal'] / ret['einit'] < 0.01ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 #             while ret['efinal'] > 0 and retry < 5:
 #                 ret = openmm_relax(args.relax_param)
 #                 print(ret['einit'],ret['efinal'])
@@ -368,7 +370,7 @@ def openmm_relax_protein_only(x):
 #             ret = openmm_relax(args.relax_param)
 #             print(ret['einit'],ret['efinal'])
 #             retry = 0
-#             # ret['einit']>0 如果ret['efinal'] / ret['einit'] < 0.01其实就可以？
+#             # ret['einit']>0 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ret['efinal'] / ret['einit'] < 0.01ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 #             while ret['efinal'] > 0 and retry < 5:
 #                 ret = openmm_relax(args.relax_param)
 #                 print(ret['einit'],ret['efinal'])

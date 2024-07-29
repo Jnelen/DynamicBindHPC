@@ -1,0 +1,23 @@
+Bootstrap: docker
+From: condaforge/mambaforge
+MirrorURL: https://hub.docker.com/r/condaforge/mambaforge-pypy3
+
+%post
+    mamba install python=3.10
+    mamba install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
+    mamba install pyg pytorch-cluster pytorch-scatter pytorch-sparse pytorch-spline-conv pyyaml biopython -c pyg
+    mamba install -c conda-forge openmm pdbfixer libstdcxx-ng openmmforcefields openff-toolkit ambertools=22 compilers rdkit pandas=2.0.2
+    
+    pip install pyg-lib -f https://data.pyg.org/whl/torch-2.1.0+cu121.html
+    pip install e3nn  fair-esm spyrmsd
+
+    /opt/conda/bin/mamba clean -a -y
+    pip cache purge
+    
+%environment
+    export MKL_THREADING_LAYER=GNU
+
+%labels
+    AUTHOR Jochem Nelen (jnelen@ucam.edu)
+    Version v1
+    Made using: https://stackoverflow.com/questions/54678805/containerize-a-conda-environment-in-a-singularity-container

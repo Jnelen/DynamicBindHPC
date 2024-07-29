@@ -19,11 +19,6 @@ from rdkit.Chem import MolFromSmiles, AddHs
 from rdkit import Chem
 
 import torch
-torch.set_num_threads(1)
-torch.multiprocessing.set_sharing_strategy('file_system')
-
-
-
 from torch_geometric.loader import DataLoader
 
 
@@ -43,6 +38,8 @@ from multiprocessing import Pool as ThreadPool
 
 import random
 import pickle
+
+import subprocess
 # pool = ThreadPool(8)
 
 @contextmanager
@@ -64,11 +61,11 @@ parser.add_argument('--out_dir', type=str, default='results/user_inference', hel
 parser.add_argument('--esm_embeddings_path', type=str, default='data/esm2_output', help='If this is set then the LM embeddings at that path will be used for the receptor features')
 parser.add_argument('--save_visualisation', action='store_true', default=False, help='Save a pdb file with all of the steps of the reverse diffusion')
 parser.add_argument('--samples_per_complex', type=int, default=10, help='Number of samples to generate')
-parser.add_argument('--savings_per_complex', type=int, default=1, help='Number of samples to save')
+parser.add_argument('--savings_per_complex', type=int, default=10, help='Number of samples to save')
 parser.add_argument('--seed', type=int, default=42, help='set seed number')
 
-parser.add_argument('--model_dir', type=str, default='workdir/paper_score_model', help='Path to folder with trained score model and hyperparameters')
-parser.add_argument('--ckpt', type=str, default='best_ema_inference_epoch_model.pt', help='Checkpoint to use for the score model')
+parser.add_argument('--model_dir', type=str, default='workdir/big_score_model_sanyueqi_with_time', help='Path to folder with trained score model and hyperparameters')
+parser.add_argument('--ckpt', type=str, default='ema_inference_epoch314_model.pt', help='Checkpoint to use for the score model')
 parser.add_argument('--confidence_model_dir', type=str, default=None, help='Path to folder with trained confidence model and hyperparameters')
 parser.add_argument('--confidence_ckpt', type=str, default='best_model_epoch75.pt', help='Checkpoint to use for the confidence model')
 
@@ -86,8 +83,33 @@ parser.add_argument('--protein_dynamic', action='store_true', default=False, hel
 parser.add_argument('--relax', action='store_true', default=False, help='Use no noise in the final step of the reverse diffusion')
 parser.add_argument('--use_existing_cache', action='store_true', default=False, help='Use existing cache file, if they exist.')
 
+parser.add_argument('--cores', '-c', type=int, default=1, help='How many cores to use.')
+parser.add_argument('--delete_cache', action='store_true', default=False, help='Keep the generated cache')
+parser.add_argument('--remove_output_hs', action='store_true', default=False, help='Don\'t include explicit hydrogens in the output ligands')
 
 args = parser.parse_args()
+
+beginTime = time.time()
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+try:
+    torch.set_num_threads(args.cores)
+    print(f"DynamicBind will run on {device}, and use {args.cores} CPU core(s)")
+except:
+
+    print("Something went wrong when specifying the requested number of threads, a different amount of resources might be used..")
+    print(f"DiffDock will run on {device}")
+
+print(f"Using {args.ckpt} for the model weights")
+
+torch.multiprocessing.set_sharing_strategy('file_system')
+
+outputDirList = []
+
+if not args.save_visualisation:
+    outputDirList = [f'{args.out_dir}/molecules/']
+    
 def Seed_everything(seed=42):
     random.seed(seed)
     os.environ['PYTHONHASHSEED'] = str(seed)
@@ -116,20 +138,13 @@ if args.confidence_model_dir is not None:
     with open(f'{args.confidence_model_dir}/model_parameters.yml') as f:
         confidence_args = Namespace(**yaml.full_load(f))
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
 if args.protein_ligand_csv is not None:
-    df = pd.read_csv(args.protein_ligand_csv)
-    # df = df[:10]
+    df = pd.read_csv(args.protein_ligand_csv, sep=";")
+
     if 'crystal_protein_path' not in df.columns:
         df['crystal_protein_path'] = df['protein_path']
     protein_path_list = df['protein_path'].tolist()
     ligand_descriptions = df['ligand'].tolist()
-    # if 'name' not in df.columns:
-    #     df['name'] = [f'idx_{i}' for i in range(df.shape[0])]
-    # elif df['name'].nunique() < df.shape[0]:
-    #     df['name'] = [f'idx_{i}' for i in range(df.shape[0])]
-    df['name'] = [f'idx_{i}' for i in range(df.shape[0])]
     name_list = df['name'].tolist()
 else:
     protein_path_list = [args.protein_path]
@@ -192,6 +207,7 @@ def predict_one_complex(affinity_pred, df, orig_complex_graph, model, tr_schedul
     randomize_position(data_list, score_model_args.no_torsion, args.no_random,score_model_args.tr_sigma_max,score_model_args.rot_sigma_max, score_model_args.tor_sigma_max,score_model_args.res_tr_sigma_max,score_model_args.res_rot_sigma_max)
     data_list_randomized = copy.deepcopy(data_list)
     pdb = None
+
     lig = orig_complex_graph.mol[0]
     receptor_pdb = orig_complex_graph.rec_pdb[0]
     pdb_or_cif = receptor_pdb.get_full_id()[0]
@@ -246,61 +262,66 @@ def predict_one_complex(affinity_pred, df, orig_complex_graph, model, tr_schedul
     run_times.append(time.time() - start_time)
 
     true_idx = final_data_list[0]["name"][0].replace("/","-").split("_")[-1]
-    write_dir = f'{args.out_dir}/index{true_idx}_idx_{true_idx}'
+    if args.save_visualisation:
+        write_dir = f'{args.out_dir}/complexes/{orig_complex_graph.name[0]}/'
+        outputDirList.append(write_dir)
+    else:
+        write_dir = f'{args.out_dir}/molecules/'
+        
     os.makedirs(write_dir, exist_ok=True)
     row = df.loc[df['name']==data_list[0]["name"][0]]
     protein_path = row['protein_path'].values[0]
     ligand_path = row['ligand'].values[0]
-    shutil.copy2(f'{protein_path}',write_dir)
-    try:
-        shutil.copy2(f'{ligand_path}',write_dir)
-    except:
-        pass
-    save_protein(receptor_pdb,f'{write_dir}/ref_proteinFile.{pdb_or_cif}')
-    w = Chem.SDWriter(f'{write_dir}/ref_ligandFile.sdf')
-    w.write(lig)
-    w.close()
-    # sample_ligand_path_list = []
-    # sample_protein_path_list = []
-    # for rank, pos in enumerate(ligand_pos):
-    #     mol_pred = copy.deepcopy(lig)
-    #     if rank == 0: write_mol_with_coords(mol_pred, pos, os.path.join(write_dir, f'rank{rank+1}.sdf'))
-    #     write_mol_with_coords(mol_pred, pos, os.path.join(write_dir, f'rank{rank+1}_ligand.sdf'))
-    #     save_protein(final_receptor_pdbs[rank],os.path.join(write_dir, f'rank{rank+1}_receptor.pdb'))
-    #     sample_ligand_path_list.append(os.path.join(write_dir, f'rank{rank+1}_ligand.sdf'))
-    #     sample_protein_path_list.append(os.path.join(write_dir, f'rank{rank+1}_receptor.pdb'))
-
-
+    
     all_lddt_pred = all_lddt_pred.view(-1).cpu().numpy()
-    # print(all_lddt_pred)
+    
     all_affinity_pred = all_affinity_pred.view(-1).cpu().numpy()
     final_affinity_pred = np.minimum((all_affinity_pred*all_lddt_pred).sum() / (all_lddt_pred.sum()+1e-12),15.)
 
     affinity_pred[orig_complex_graph.name[0]] = final_affinity_pred
-    # print(all_affinity_pred)
-    # re_order = np.argsort(all_lddt_pred)[::-1]
+
     ligandFiles = []
     pdbFiles = []
     clash_scores = []
     for rank, order in enumerate(range(min(args.samples_per_complex,len(all_lddt_pred)))):
         mol_pred = copy.deepcopy(lig)
-        ligandFile = os.path.join(write_dir, f'step1_rank{rank+1}_ligand_lddt{all_lddt_pred[order]:.2f}_affinity{all_affinity_pred[order]:.2f}.sdf')
-        write_mol_with_coords(mol_pred, ligand_pos[order], ligandFile)
+        if args.save_visualisation:
+            prefix = ""
+        else:
+            prefix = "VS_DB_"    
+        ligandFile = os.path.join(write_dir, f'{prefix}{orig_complex_graph.name[0]}_step1_rank{rank+1}_ligand_lddt{all_lddt_pred[order]:.2f}_affinity{all_affinity_pred[order]:.2f}.sdf')
+
+        mol_pred.SetProp("_Name", str(orig_complex_graph.name[0]))
+        mol_pred.SetProp("lddt", f"{all_lddt_pred[order]:.2f}")
+        mol_pred.SetProp("affinity", f"{all_affinity_pred[order]:.2f}")
+        
+        write_mol_with_coords(mol_pred, ligand_pos[order], ligandFile, args.remove_output_hs)
         new_receptor_pdb = copy.deepcopy(receptor_pdb)
         if args.protein_dynamic:
             modify_pdb(new_receptor_pdb,final_data_list[order])
-        pdbFile = os.path.join(write_dir, f'step1_rank{rank+1}_receptor_lddt{all_lddt_pred[order]:.2f}_affinity{all_affinity_pred[order]:.2f}.{pdb_or_cif}')
+
+        pdbFile = os.path.join(write_dir, f'{prefix}{orig_complex_graph.name[0]}_step1_rank{rank+1}_receptor_lddt{all_lddt_pred[order]:.2f}_affinity{all_affinity_pred[order]:.2f}.{pdb_or_cif}')
         save_protein(new_receptor_pdb,pdbFile)
-        ligandFiles.append(ligandFile)
         pdbFiles.append(pdbFile)
+            
+        ligandFiles.append(ligandFile)
         clash_scores.append(compute_side_chain_metrics(pdbFile, ligandFile, verbose=False))
 
     re_order = np.argsort(scipy.stats.rankdata(-all_lddt_pred) + scipy.stats.rankdata(clash_scores)/2.)#np.argsort(all_lddt_pred)[::-1]
     complete_affinity = pd.DataFrame({'name':orig_complex_graph.name[0],'rank':np.arange(len(all_lddt_pred))+1,'lddt':all_lddt_pred[re_order],'affinity':all_affinity_pred[re_order]})
 
     for rank, order in enumerate(re_order):
+
         os.rename(ligandFiles[order],ligandFiles[order].replace(f'step1_rank{order+1}',f'rank{rank+1}'))
-        os.rename(pdbFiles[order],pdbFiles[order].replace(f'step1_rank{order+1}',f'rank{rank+1}'))
+        
+        if args.save_visualisation:
+            os.rename(pdbFiles[order],pdbFiles[order].replace(f'step1_rank{order+1}',f'rank{rank+1}'))
+        else:
+            for filepath in pdbFiles:
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+                    
+
     if args.save_visualisation:
         for rank, order in enumerate(re_order[:args.savings_per_complex]):
             visualization_list = [(lig, receptor_pdb)]
@@ -308,41 +329,49 @@ def predict_one_complex(affinity_pred, df, orig_complex_graph, model, tr_schedul
                 visualization_list.append(data_list[order])
             with open(os.path.join(write_dir, f'rank{rank+1}_reverseprocess_data_list.pkl'), 'wb') as f:
                 pickle.dump(visualization_list, f)
+         
 
     names_list.append(orig_complex_graph.name[0])
     return affinity_pred, complete_affinity
 
-for idx, orig_complex_graph in tqdm(enumerate(test_loader)):
+for idx, orig_complex_graph in tqdm(enumerate(test_loader), ascii=True, total=len(test_loader)):
     # if idx not in [54, 123, 141, 157, 165, 251]:continue
     try:
         affinity_pred, complete_affinity = predict_one_complex(affinity_pred, df, orig_complex_graph, model, 
                                 tr_schedule, rot_schedule, tor_schedule, res_tr_schedule, res_rot_schedule, res_chi_schedule,
                                 t_to_sigma, N, score_model_args, args, device)
     except Exception as e:
-        # raise(e)
-        print(e, "but give second chance")
-        try:
-            affinity_pred, complete_affinity = predict_one_complex(affinity_pred, df, orig_complex_graph, model, 
-                                tr_schedule, rot_schedule, tor_schedule, res_tr_schedule, res_rot_schedule, res_chi_schedule,
-                                t_to_sigma, N, score_model_args, args, device)
-        except Exception as e:
-            print("Failed on", orig_complex_graph["name"], e)
-            failures += 1
-            continue
-    all_complete_affinity.append(complete_affinity)
-print(f'Failed for {failures} complexes')
-print(f'Skipped {skipped} complexes')
 
-affinity_pred_df = pd.DataFrame({'name':list(affinity_pred.keys()),'affinity':list(affinity_pred.values())})
-affinity_pred_df.to_csv(f'{args.out_dir}/affinity_prediction.csv',index=False)
-pd.concat(all_complete_affinity).to_csv(f'{args.out_dir}/complete_affinity_prediction.csv',index=False)
-# min_self_distances = np.array(min_self_distances_list)
-# confidences = np.array(confidences_list)
-# names = np.array(names_list)
-# run_times = np.array(run_times)
-# np.save(f'{args.out_dir}/min_self_distances.npy', min_self_distances)
-# np.save(f'{args.out_dir}/confidences.npy', confidences)
-# np.save(f'{args.out_dir}/run_times.npy', run_times)
-# np.save(f'{args.out_dir}/complex_names.npy', np.array(names))
+        print("Failed on", orig_complex_graph["name"], ":\n", e)
+        failures += 1
+        continue
+    all_complete_affinity.append(complete_affinity)
+
+
+
+#affinity_pred_df = pd.DataFrame({'name':list(affinity_pred.keys()),'affinity':list(affinity_pred.values())})
+#affinity_pred_df.to_csv(f'{args.out_dir}/affinity_prediction.csv',index=False)
+#pd.concat(all_complete_affinity).to_csv(f'{args.out_dir}/complete_affinity_prediction.csv',index=False)
+
+if args.delete_cache == True:
+	print(f"Removing cache directory at {test_dataset.full_cache_path}")
+	shutil.rmtree(test_dataset.full_cache_path)
+
+print(f"{len(test_dataset)-failures-skipped} out of {len(test_dataset)} ({100*(len(test_dataset)-skipped-failures)/len(test_dataset):.2f}%) complexes were succesfully processed. (Failed for {failures} complexes, Skipped {skipped} complexes)")
 
 print(f'Results are in {args.out_dir}')
+
+print(f"Inference calculations finished after {time.time()-beginTime:.2f} seconds")
+
+if args.relax and args.save_visualisation:
+	print("\nRelaxing structures..")
+	relaxTime = time.time()
+
+	if torch.cuda.is_available():
+	    gpu_arg = "--gpu"
+	else:
+	    gpu_arg = ""
+	
+	subprocess.run(f"python3 -u relax_final.py --samples_per_complex {args.samples_per_complex} --num_workers {args.cores} {gpu_arg} --input_paths {' '.join(outputDirList)}", shell=True)
+	print(f"Finished relaxing the structures afer {time.time()-relaxTime:.2f} seconds")
+	

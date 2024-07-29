@@ -20,11 +20,15 @@ from openmm import app as openmm_app
 
 from utils.relax import openmm_relax
 
+import glob
+
 parser = ArgumentParser()
 
 parser.add_argument('--results_path', type=str, default='results/user_inference', help='Directory where the outputs will be written to')
+parser.add_argument('--input_paths', nargs='+', help='The exact input paths you want to be processed')
 parser.add_argument('--num_workers', type=int, default=20, help='Number of workers for creating the dataset')
 parser.add_argument('--samples_per_complex', type=int, default=1, help='Number of samples to generate')
+parser.add_argument('--gpu', action='store_true', default=False, help='Use a GPU for the relaxing process')
 
 args = parser.parse_args()
 
@@ -502,16 +506,28 @@ def run_relax(x):
 if __name__ == '__main__':
     input_ = []
     idx = 0
-    results_path_containments = sorted(os.listdir(args.results_path))
-    results_path_containments = [x for x in results_path_containments if x != 'affinity_prediction.csv']
+
+    if len(args.input_paths) < 1:
+        results_path_containments = sorted(os.listdir(args.results_path))
+        results_path_containments = [x for x in results_path_containments if x != 'affinity_prediction.csv']
+    else:
+        results_path_containments = sorted(args.input_paths)
 
     for rp in results_path_containments:
-        if not rp.startswith('index'):
+        if not rp.startswith('index') and len(args.input_paths) < 1:
             continue
         # if int(rp.split('_')[0][5:]) > 20:continue
-        write_dir = os.path.join(args.results_path, rp)
+        if len(args.input_paths) < 1:
+            write_dir = os.path.join(args.results_path, rp)
+        else:
+            write_dir = rp
+            
         file_paths = sorted(os.listdir(write_dir))
-        ref_proteinFile = os.path.join(write_dir, [path for path in file_paths if f'ref_proteinFile' in path][0])
+        if len(args.input_paths) < 1:
+            ref_proteinFile = os.path.join(write_dir, [path for path in file_paths if f'ref_proteinFile' in path][0])
+        else:
+            ref_proteinFile = glob.glob(f'{write_dir}/../../*pdb')[0]
+            
         # input structure maybe different with rdkit comformation
         try:
             ref_ligandFile = os.path.join(write_dir, [path for path in file_paths if f'ref_ligandFile' in path][0])
@@ -532,7 +548,7 @@ if __name__ == '__main__':
             stiffness, ligand_stiffness = 1000, 3000
             relaxed_complexFile = relaxed_proteinFile.replace("_receptor_", "_complex_")
             relaxed_ligandFile = os.path.join(write_dir, ligand_file_name.replace('.sdf','_relaxed.sdf'))
-            use_gpu = True
+            use_gpu = args.gpu
             x = (ref_proteinFile, ref_ligandFile, pdbFile, ligandFile, fixed_pdbFile, relaxed_proteinFile, gap_mask, stiffness, ligand_stiffness, relaxed_complexFile, relaxed_ligandFile, use_gpu)
             input_.append(x)
             idx += 1
@@ -541,7 +557,7 @@ if __name__ == '__main__':
     # for x in input_:
     #     print(x[0],x[2])
     # raise
-    r = process_map(run_relax, input_, max_workers=args.num_workers)
+    r = process_map(run_relax, input_, max_workers=args.num_workers, ascii=True)
 
     for rp in results_path_containments:
         if not rp.startswith('index'):

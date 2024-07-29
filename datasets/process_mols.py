@@ -317,7 +317,7 @@ def generate_conformer(mol):
         AllChem.MMFFOptimizeMolecule(mol, confId=0)
     # else:
     #    AllChem.MMFFOptimizeMolecule(mol_rdkit, confId=0)
-    # 尝试用力场优化构象 2023.07.09
+    # Ã¥Â°ï¿½Ã¨Â¯â€¢Ã§â€�Â¨Ã¥Å â€ºÃ¥Å“ÂºÃ¤Â¼ËœÃ¥Å’â€“Ã¦Å¾â€žÃ¨Â±Â¡ 2023.07.09
     AllChem.MMFFOptimizeMolecule(mol, mmffVariant='MMFF94s', maxIters=500)
 
 
@@ -578,12 +578,17 @@ def get_fullrec_graph(name, rec, rec_coords, c_alpha_coords, n_coords, c_coords,
 
     return
 
-def write_mol_with_coords(mol, new_coords, path):
+def write_mol_with_coords(mol, new_coords, path, remove_output_hs):
     w = Chem.SDWriter(path)
     conf = mol.GetConformer()
     for i in range(mol.GetNumAtoms()):
         x,y,z = new_coords.astype(np.double)[i]
         conf.SetAtomPosition(i,Point3D(x,y,z))
+    if not remove_output_hs:
+        mol = Chem.AddHs(mol, addCoords=True)
+    else:
+        mol = Chem.RemoveHs(mol)
+        
     w.write(mol)
     w.close()
 

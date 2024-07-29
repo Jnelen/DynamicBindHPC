@@ -11,6 +11,7 @@ from rdkit import Geometry
 import numpy as np
 from collections import defaultdict
 
+import torch
 
 class LigandToPDB:
     def __init__(self, mol):
@@ -19,7 +20,7 @@ class LigandToPDB:
         [self.mol.RemoveConformer(j) for j in range(mol.GetNumConformers()) if j]
     def add(self, coords, order, part=0, repeat=1):
         if type(coords) in [rdkit.Chem.Mol, rdkit.Chem.RWMol]:
-            block = MolToPDBBlock(coords).split('\n')[:-2]
+            block = MolToPDBBlock(coords, flavor=4).split('\n')[:-2]
             self.parts[part][order] = {'block': block, 'repeat': repeat}
             return
         elif type(coords) is np.ndarray:
@@ -28,7 +29,7 @@ class LigandToPDB:
             coords = coords.double().numpy()
         for i in range(coords.shape[0]):
             self.mol.GetConformer(0).SetAtomPosition(i, Geometry.Point3D(coords[i, 0], coords[i, 1], coords[i, 2]))
-        block = MolToPDBBlock(self.mol).split('\n')[:-2]
+        block = MolToPDBBlock(self.mol, flavor=4).split('\n')[:-2]
         self.parts[part][order] = {'block': block, 'repeat': repeat}
 
     def write(self, path=None, limit_parts=None):
@@ -84,7 +85,7 @@ def save_protein(s, proteinFile, ca_only=False):
 
 
 def single_sample_movie(file_names, write_dir, rank, inference_steps, ):
-    for step in range(inference_steps+1):
+    for step in tqdm(range(inference_steps+1), ascii=True):
         ligandFile = os.path.join(write_dir, [fn for fn in file_names if f'rank{rank}_ligand_step{step+1}.' in fn][0])
         pdbFile = os.path.join(write_dir, [fn for fn in file_names if f'rank{rank}_receptor_step{step+1}.' in fn][0])
         if step == 0:
@@ -108,7 +109,8 @@ def single_sample_movie(file_names, write_dir, rank, inference_steps, ):
         stiffness = 1000
         ligand_stiffness = 3000
         relaxed_complexFile = "none"
-        use_gpu = True #if torch.cuda.is_available() else False
+        use_gpu = True if torch.cuda.is_available() else False
+        
         if step < inference_steps-1:
             relaxed_ligandFile = ligandFile
             try:
@@ -118,6 +120,7 @@ def single_sample_movie(file_names, write_dir, rank, inference_steps, ):
                     # if ret['einit'] > 0 and ret['efinal'] / ret['einit'] < 0.1:
                     #     break
                     ret = openmm_relax_protein_only((relaxed_proteinFile, fixed_pdbFile, relaxed_proteinFile, gap_mask, stiffness, use_gpu))
+                    print(ret)
 
                     retry += 1
                 # print(ret['einit'],ret['efinal'])
@@ -128,7 +131,8 @@ def single_sample_movie(file_names, write_dir, rank, inference_steps, ):
         else:
             relaxed_ligandFile = os.path.join(write_dir, [fn for fn in file_names if f'rank{rank}_ligand_lddt' in fn and 'relaxed' in fn][0])
             relaxed_proteinFile = os.path.join(write_dir, [fn for fn in file_names if f'rank{rank}_receptor_lddt' in fn and 'relaxed' in fn][0])
-            # relaxed_ligandFile = os.path.join(write_dir, f'rank{rank}_ligand_step{step+1}_relaxed.sdf')
+            relaxed_ligandFile = ligandFile
+            
             # try:
             #     retry = 0
             #     ret = openmm_relax((pdbFile, ligandFile, fixed_pdbFile, relaxed_proteinFile, gap_mask, stiffness, ligand_stiffness, relaxed_complexFile, relaxed_ligandFile, use_gpu))
